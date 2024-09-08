@@ -382,6 +382,8 @@ dependencies = [
  "axum",
  "env_logger",
  "log",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 
