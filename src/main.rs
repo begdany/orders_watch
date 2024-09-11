@@ -18,19 +18,22 @@ use std::sync::{
     Arc, // Тип Arc применяется для доступа нескольским владельцам к одним и тем же данным
     Mutex // Тип Mutex применяется для предотвращения состояния гонки 
 };
+use std::collections::HashMap;
 
 // Определяем структуру, содержащую данные о товаре
 #[derive(Deserialize, Clone)]
 struct ItemData {
     brand: String,
     name: String,
-    price: u32,
+    price: i64,
+    id: u8,
 }
 
-// Определяем структуру, содержащую данные, которые можно безопасно разделять между потоками
+// Определяем структуры, содержащую данные, которые можно безопасно разделять между потоками
 #[derive(Clone)]
 struct AppState {
     data: Arc<Mutex<Option<ItemData>>>,
+    data_map: Arc<Mutex<HashMap<u8, ItemData>>>,
 }
 
 #[tokio::main]
@@ -43,6 +46,7 @@ async fn main() {
     // Создаем начальное состояние, данные отсутствуют
     let shared_state = AppState {
         data: Arc::new(Mutex::new(None)),
+        data_map: Arc::new(Mutex::new(HashMap::new())),
     };
 
     // Определяем структуру приложения (маршрут -> функция)
@@ -78,8 +82,9 @@ async fn show_data(
         <h1>Полученные данные</h1>
         <p>Фирма: {}</p>
         <p>Название: {}</p>
-        <p>Стоимость: {}</p>",
-         data.brand, data.name, data.price))
+        <p>Стоимость: {}</p>
+        <p>ID: {}</p>",
+        data.brand, data.name, data.price, data.id))
     } else {
         log::info!("Данные отсутствуют.");
         Html("<h1>Данные еще не были отправлены.</h1>".to_string())
@@ -92,7 +97,12 @@ async fn receive_data(
     Json(payload): Json<ItemData>, // Десериализуем данные
 ) -> impl IntoResponse { // Формируем ответ
     let mut data = state.data.lock().unwrap(); // Получаем доступ к данным состояния
-    *data = Some(payload); // Обновляем данные
+    *data = Some(payload.clone()); // Обновляем данные
+    
+    // Добавляем объект в хеш-таблицу
+    let mut data_map = state.data_map.lock().unwrap();
+    data_map.insert(payload.id.clone(), payload);
+
     log::info!("Приняты новые данные.");
 
     StatusCode::OK // Успешное выполнение операции
