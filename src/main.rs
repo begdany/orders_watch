@@ -34,6 +34,8 @@ struct ItemData {
 struct AppState {
     data: Arc<Mutex<Option<ItemData>>>,
     data_map: Arc<Mutex<HashMap<u8, ItemData>>>,
+    index: Arc<Mutex<usize>>, // Начальный индекс
+    keys: Arc<Mutex<Vec<u8>>>, // Начальный пустой массив ключей
 }
 
 #[tokio::main]
@@ -47,11 +49,17 @@ async fn main() {
     let shared_state = AppState {
         data: Arc::new(Mutex::new(None)),
         data_map: Arc::new(Mutex::new(HashMap::new())),
+        index: Arc::new(Mutex::new(0)), // Начальный индекс
+        keys: Arc::new(Mutex::new(Vec::new())), // Начальный пустой массив ключей
     };
 
     // Определяем структуру приложения (маршрут -> функция)
     let app = Router::new()
-        .route("/post", post(receive_data))  // Принимаем данные
+        .route("/post", post(receive_data)) // Принимаем данные
+        .route("/previous", get(|state| navigate(state, NavigationDirection::Previous))) // Выводим предыдущие данные
+        .route("/next", get(|state| navigate(state, NavigationDirection::Next))) // Выводим следующие данные
+        .route("/first", get(|state| navigate(state, NavigationDirection::First))) // Выводим последние данные
+        .route("/last", get(|state| navigate(state, NavigationDirection::Last))) // Выводим последние данные
         .route("/", get(show_data)) // Выводим данные на страницу
         .with_state(shared_state); // Передаем текущее состояние
     
@@ -73,22 +81,28 @@ async fn main() {
 async fn show_data(
     State(state): State<AppState> // Получаем доступ к состоянию
 ) -> impl IntoResponse { // Формируем ответ
-    let data = state.data.lock().unwrap(); // Получаем доступ к данным состояния
+    let index = *state.index.lock().unwrap();
+    let keys = state.keys.lock().unwrap();
+    let data_map = state.data_map.lock().unwrap();
     log::info!("Получен запрос на показ данных.");
+
     // Проверяем есть ли данные в data и формируем html-ответ
-    if let Some(ref data) = *data {
-        log::info!("Данные отображены.");
-        Html(format!("
-        <h1>Полученные данные</h1>
-        <p>Фирма: {}</p>
-        <p>Название: {}</p>
-        <p>Стоимость: {}</p>
-        <p>ID: {}</p>",
-        data.brand, data.name, data.price, data.id))
-    } else {
-        log::info!("Данные отсутствуют.");
-        Html("<h1>Данные еще не были отправлены.</h1>".to_string())
+    if index > 0 && index <= keys.len() {
+        if let Some(item) = data_map.get(&keys[index - 1]) {
+            log::info!("Данные отображены.");
+            return Html(format!(
+                "<h1>Данные</h1>
+                <p>Фирма: {}</p>
+                <p>Название: {}</p>
+                <p>Стоимость: {}</p>
+                <p>ID: {}</p>",
+                item.brand, item.name, item.price, item.id
+            ));
+        }
     }
+
+    log::info!("Данные отсутствуют.");
+    Html("<h1>Данные отсутствуют.</h1>".to_string())
 }
 
 // Функция приема данных и обновления состояния
@@ -101,9 +115,74 @@ async fn receive_data(
     
     // Добавляем объект в хеш-таблицу
     let mut data_map = state.data_map.lock().unwrap();
-    data_map.insert(payload.id.clone(), payload);
+    data_map.insert(payload.id, payload.clone());
 
+    // Добавляем ключ в массив
+    let mut keys = state.keys.lock().unwrap();
+    keys.push(payload.id);
+
+    // Обновляем текущий индекс
+    let mut index = state.index.lock().unwrap();
+    *index = keys.len();
+    log::info!("индекс: {}", index);
     log::info!("Приняты новые данные.");
 
     StatusCode::OK // Успешное выполнение операции
+}
+
+enum NavigationDirection {
+    Previous,
+    Next,
+    First,
+    Last,
+}
+
+// Функция навигации
+async fn navigate(
+    State(state): State<AppState>,
+    direction: NavigationDirection,
+) -> impl IntoResponse {
+    let mut index = state.index.lock().unwrap();
+    let keys = state.keys.lock().unwrap();
+    let data_map = state.data_map.lock().unwrap();
+
+    match direction {
+        NavigationDirection::Previous => {
+            if *index > 1 {
+                *index -= 1;
+            }
+            log::info!("Переход на предыдущие данные.");
+        }
+        NavigationDirection::Next => {
+            if *index < keys.len() {
+                *index += 1;
+            }
+            log::info!("Переход на следующие данные.");
+        }
+        NavigationDirection::First => {
+            if keys.len() > 0 {
+                *index = 1;
+                log::info!("Переход на первые данные.");
+            }
+        }
+        NavigationDirection::Last => {
+            *index = keys.len();
+            log::info!("Переход на последние данные.");
+        }
+    }
+
+    if *index > 0 {
+        if let Some(item) = data_map.get(&keys[*index-1]) {
+            return Html(format!(
+                "<h1>Данные</h1>
+                <p>Фирма: {}</p>
+                <p>Название: {}</p>
+                <p>Стоимость: {}</p>
+                <p>ID: {}</p>",
+                item.brand, item.name, item.price, item.id
+            ));
+        }
+    }
+
+    Html("<h1>Данные отсутствуют.</h1>".to_string())
 }
