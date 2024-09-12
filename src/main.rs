@@ -26,16 +26,16 @@ struct ItemData {
     brand: String,
     name: String,
     price: i64,
-    id: u8,
+    id: String,
 }
 
 // Определяем структуры, содержащую данные, которые можно безопасно разделять между потоками
 #[derive(Clone)]
 struct AppState {
     data: Arc<Mutex<Option<ItemData>>>,
-    data_map: Arc<Mutex<HashMap<u8, ItemData>>>,
+    data_map: Arc<Mutex<HashMap<String, ItemData>>>,
     index: Arc<Mutex<usize>>, // Начальный индекс
-    keys: Arc<Mutex<Vec<u8>>>, // Начальный пустой массив ключей
+    keys: Arc<Mutex<Vec<String>>>, // Начальный пустой массив ключей
 }
 
 #[tokio::main]
@@ -91,12 +91,12 @@ async fn show_data(
         if let Some(item) = data_map.get(&keys[index - 1]) {
             log::info!("Данные отображены.");
             return Html(format!(
-                "<h1>Данные</h1>
+                "<h1>Данные заказа №{}</h1>
                 <p>Фирма: {}</p>
                 <p>Название: {}</p>
                 <p>Стоимость: {}</p>
                 <p>ID: {}</p>",
-                item.brand, item.name, item.price, item.id
+                index, item.brand, item.name, item.price, item.id
             ));
         }
     }
@@ -115,16 +115,15 @@ async fn receive_data(
     
     // Добавляем объект в хеш-таблицу
     let mut data_map = state.data_map.lock().unwrap();
-    data_map.insert(payload.id, payload.clone());
+    data_map.insert(payload.id.clone(), payload.clone());
 
     // Добавляем ключ в массив
     let mut keys = state.keys.lock().unwrap();
-    keys.push(payload.id);
+    keys.push(payload.id.clone());
 
     // Обновляем текущий индекс
     let mut index = state.index.lock().unwrap();
     *index = keys.len();
-    log::info!("индекс: {}", index);
     log::info!("Приняты новые данные.");
 
     StatusCode::OK // Успешное выполнение операции
